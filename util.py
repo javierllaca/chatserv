@@ -2,6 +2,12 @@ import re
 
 COMMAND_TOKEN_REGEX = re.compile(r'\(.*\)|\'.*\'|\S+')
 
+
+def sha1_hex(string):
+    sha_obj = sha.new(string)
+    return sha_obj.hexdigest()
+
+
 def parse_command(command_string):
     tokens = [match.group(0) for match in COMMAND_TOKEN_REGEX.finditer(command_string)]
     if not tokens:
