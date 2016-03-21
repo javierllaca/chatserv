@@ -1,5 +1,6 @@
 import os
 import sha
+import socket
 import SocketServer
 import sys
 import time
@@ -20,7 +21,7 @@ class User:
     def is_active(self):
         return self.login_socket is not None
 
-    def login(self, login_socket, login_ip, last_active):
+    def login(self, login_socket, login_ip):
         self.login_socket = login_socket
         self.login_ip = login_ip
         self.last_active = int(time.time())
@@ -57,23 +58,28 @@ class ChatServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     def handle(self):
+        self.request.settimeout(30 * 60)  # timeout after 30 minutes
+        self.log('Connection established')
+        self.user = None
         try:
-            self.log('Connection established')
             if self.authenticate():
                 self.user.login(self.request, self.ip)
                 self.request.sendall('Welcome, {}!\n'.format(self.user.username))
-                client_input = None
+                client_input = ''
                 while client_input != 'logout':
                     client_input = self.prompt('> ')
                     self.user.last_active = int(time.time())
                     self.process_command(client_input)
                 self.user.logout()
-            self.log('Connection terminated')
+        except socket.timeout:
+            self.log('User timeout')
+            if self.user:
+                self.user.logout()
         except Exception as exception:
             self.log('Connection lost')
+        self.log('Connection terminated')
 
     def authenticate(self):
-        self.user = None
         while not self.user:
             username = self.prompt('username: ')
             user = self.server.users.get(username)
