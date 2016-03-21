@@ -4,37 +4,8 @@ import socket
 import SocketServer
 import sys
 import time
+import user
 import util
-
-
-class User:
-
-    def __init__(self, username, password_sha, login_socket=None,
-            login_ip=None, last_active=None, blocked_ips=None):
-        self.username = username
-        self.password_sha = password_sha
-        self.login_socket = login_socket
-        self.login_ip = login_ip
-        self.last_active = last_active or float('-inf')
-        self.blocked_ips = blocked_ips or {}
-
-    def is_active(self):
-        return self.login_socket is not None
-
-    def login(self, login_socket, login_ip):
-        self.login_socket = login_socket
-        self.login_ip = login_ip
-        self.last_active = int(time.time())
-
-    def logout(self):
-        self.login_socket = None
-
-    def send_message(self, message, from_user):
-        self.login_socket.sendall('[{}] {}: {}\n> '.format(
-            time.strftime('%m/%d/%y% at %H:%M:%S'),
-            from_user.username,
-            message,
-        ))
 
 
 class ChatServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
@@ -52,16 +23,16 @@ class ChatServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
             self.add_user(username, password_sha)
 
     def add_user(self, username, password_sha):
-        self.users[username] = User(username, password_sha)
+        self.users[username] = user.User(username, password_sha)
 
 
 class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     def handle(self):
         self.request.settimeout(30 * 60)  # timeout after 30 minutes
-        self.log('Connection established')
         self.user = None
         try:
+            self.log('Connection established')
             if self.authenticate():
                 self.user.login(self.request, self.ip)
                 self.request.sendall('Welcome, {}!\n'.format(self.user.username))
@@ -71,13 +42,14 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
                     self.user.last_active = int(time.time())
                     self.process_command(client_input)
                 self.user.logout()
+            self.log('Connection terminated')
         except socket.timeout:
             self.log('User timeout')
-            if self.user:
-                self.user.logout()
         except Exception as exception:
             self.log('Connection lost')
-        self.log('Connection terminated')
+        finally:
+            if self.user:
+                self.user.logout()
 
     def authenticate(self):
         while not self.user:

@@ -1,4 +1,5 @@
 import re
+import sha
 
 COMMAND_TOKEN_REGEX = re.compile(r'\(.*\)|\'.*\'|\S+')
 
