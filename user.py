@@ -1,30 +1,35 @@
-import time
+from Queue import Queue
+import util
+
 
 class User:
 
-    def __init__(self, username, password_sha, login_socket=None,
-            login_ip=None, last_active=None, blocked_ips=None):
+    def __init__(self, username, password_sha):
         self.username = username
         self.password_sha = password_sha
-        self.login_socket = login_socket
-        self.login_ip = login_ip
-        self.last_active = last_active or float('-inf')
-        self.blocked_ips = blocked_ips or {}
+        self.socket = None
+        self.ip = None
+        self.last_active = float('-inf')
+        self.blocked_ips = {}
+        self.message_queue = Queue()
 
-    def is_active(self):
-        return self.login_socket is not None
-
-    def login(self, login_socket, login_ip):
-        self.login_socket = login_socket
-        self.login_ip = login_ip
-        self.last_active = int(time.time())
+    def login(self, socket, ip):
+        self.socket = socket
+        self.ip = ip
+        self.last_active = util.current_time()
 
     def logout(self):
-        self.login_socket = None
+        self.socket = None
 
-    def send_message(self, message, from_user):
-        self.login_socket.sendall('[{}] {}: {}\n> '.format(
-            time.strftime('%m/%d/%y% at %H:%M:%S'),
-            from_user.username,
-            message,
-        ))
+    def enqueue_message(self, message):
+        self.message_queue.put(message)
+
+    def dump_message_queue(self):
+        messages = []
+        while not self.message_queue.empty():
+            messages.append(self.message_queue.get())
+        return messages
+
+    @property
+    def is_connected(self):
+        return self.socket is not None

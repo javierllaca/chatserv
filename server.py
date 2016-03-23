@@ -1,101 +1,103 @@
+from message import Message
 import os
-import sha
 import socket
 import SocketServer
 import sys
-import time
-import user
+from user import User
 import util
+
+BUFFER_SIZE = 1024
 
 
 class ChatServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
-    def __init__(self, server_address, request_handler_class):
-        SocketServer.TCPServer.__init__(self,server_address, request_handler_class)
-        self.load_users('user_pass.txt')
-        self.daemon_threads = True  # allow threads to run autonomously upon shutdown
+    def __init__(self, server_address, request_handler_class, user_file_path):
+        SocketServer.TCPServer.__init__(
+            self,
+            server_address,
+            request_handler_class
+        )
+        self.load_users(user_file_path)
+        self.daemon_threads = True
         os.environ['BLOCK_TIME'] = '60'
+        os.environ['TIME_OUT'] = str(30 * 60)
 
-    def load_users(self, path):
+    def load_users(self, file_path):
         self.users = {}
-        username_sha_pairs = [line.strip().split(',') for line in open(path, 'r')]
-        for username, password_sha in username_sha_pairs:
+        for line in open(file_path, 'r'):
+            username, password_sha = line.strip().split(',')
             self.add_user(username, password_sha)
 
     def add_user(self, username, password_sha):
-        self.users[username] = user.User(username, password_sha)
+        self.users[username] = User(username, password_sha)
 
 
 class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     def handle(self):
-        self.request.settimeout(30 * 60)  # timeout after 30 minutes
+        self.request.settimeout(self.time_out)
         self.user = None
         try:
             self.log('Connection established')
             if self.authenticate():
                 self.user.login(self.request, self.ip)
-                self.request.sendall('Welcome, {}!\n'.format(self.user.username))
-                client_input = ''
-                while client_input != 'logout':
-                    client_input = self.prompt('> ')
-                    self.user.last_active = int(time.time())
+                self.log('{} logged in'.format(self.user.username))
+                while self.user.is_connected:
+                    self.send_messages()
+                    client_input = self.recv()
+                    self.user.last_active = util.current_time()
                     self.process_command(client_input)
-                self.user.logout()
             self.log('Connection terminated')
         except socket.timeout:
-            self.log('User timeout')
-        except Exception as exception:
+            self.log('Connection timeout')
+        except Exception:
             self.log('Connection lost')
         finally:
-            if self.user:
+            if self.user and self.user.is_connected:
                 self.user.logout()
+                self.log('{} logged out'.format(self.user.username))
 
     def authenticate(self):
         while not self.user:
-            username = self.prompt('username: ')
+            username = self.recv()
             user = self.server.users.get(username)
             if not user:
-                register = self.prompt(
-                    'Invalid username. '
-                    'Do you wish to register a new user? [y/n] '
-                )
+                self.send_line('register')
+                register = self.recv()
                 if register == 'y':
-                    password = self.prompt('password: ')
-                    while password != self.prompt('verify password: '):
-                        self.request.sendall('Passwords don\'t match. Try again\n')
-                        password = self.prompt('password: ')
+                    self.send_line('password')
+                    password = self.recv()
+                    while password != self.recv():
+                        self.send_line('password')
+                        password = self.recv()
+                    self.send_line('registered')
                     self.register_user(username, password)
+                else:
+                    self.send_line('username')
             elif self.ip in user.blocked_ips:
-                current_time = int(time.time())
-                time_elapsed = current_time - user.blocked_ips[self.ip]
+                time_blocked = user.blocked_ips[self.ip]
+                time_elapsed = util.current_time() - time_blocked
                 time_left = self.block_time - time_elapsed
                 if time_elapsed > self.block_time:
                     user.blocked_ips.pop(self.ip)
                     self.user = user
                 else:
-                    self.request.sendall(
-                        'Logins for {} from {} were blocked {} seconds ago. '
-                        'Please try again in {} seconds.\n'.format(
-                            user.username, self.ip, time_elapsed, time_left
-                         )
-                    )
+                    self.send_line('blocked,{}'.format(time_left))
                     return False
-            elif user.is_active():
-                self.request.sendall('Username already active\n')
+            elif user.is_connected:
+                self.send_line('connected')
             else:
                 self.user = user
         login_attempts = 0
         while login_attempts < 3:
-            password = self.prompt('password: ')
+            self.send_line('password')
+            password = self.recv()
             if self.user.password_sha == util.sha1_hex(password):
+                self.send_line('welcome')
                 return True
             login_attempts += 1
-        self.request.sendall(
-            'Three failed login attempts. '
-            'Please try again in {} seconds'.format(self.block_time)
-        )
-        self.user.blocked_ips[self.ip] = int(time.time())
+        self.send_line(str(self.block_time))
+        self.user.blocked_ips[self.ip] = util.current_time()
         return False
 
     def register_user(self, username, password):
@@ -106,57 +108,98 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     def process_command(self, command_string):
         command, args = util.parse_command(command_string)
-        if command == 'who':
+        if not command:
+            pass
+        elif command == 'who':
             self.who()
         elif command == 'last':
             try:
                 number = int(args[0])
                 self.last(number)
             except Exception:
-                self.request.sendall('last: invalid argument\n')
+                self.send_line('error:args:{}'.format(command))
         elif command == 'broadcast':
-            message = ' '.join(args)
-            self.broadcast(message)
+            message_string = ' '.join(args)
+            self.broadcast(message_string)
         elif command == 'send':
             try:
-                usernames = set(args[0] if isinstance(args[0], list) else [args[0]])
-                users = filter(None, [self.server.users.get(username) for username in usernames])
-                message = ' '.join(args[1:])
-                self.send(message, users)
-            except Exception as error:
-                self.request.sendall('send: invalid argument(s)\n')
+                usernames = set(
+                    args[0] if isinstance(args[0], list) else [args[0]]
+                )
+                message_string = ' '.join(args[1:])
+                self.send(message_string, usernames)
+            except Exception:
+                self.send_line('error:args:{}'.format(command))
+        elif command == 'fetch':
+            self.send_line('fetching')
+        elif command == 'logout':
+            self.send_line('goodbye')
+            self.user.logout()
+            self.log('{} logged out'.format(self.user.username))
         else:
-            self.request.sendall('Invalid command\n')
+            self.send_line('error:command:{}'.format(command))
+
+    def send_messages(self):
+        messages = self.user.dump_message_queue()
+        for message in messages:
+            self.send_line(str(message))
+        self.send_line('DONE')
+        if messages:
+            self.log('{} received {} message(s)'.format(
+                self.user.username,
+                len(messages)
+            ))
 
     def who(self):
-        message = ''
+        usernames = []
         for user in self.server.users.values():
-            if user.is_active():
-                message += user.username
-                message += '\n'
-        self.request.sendall(message)
+            if user.is_connected:
+                usernames.append(user.username)
+        self.send_line(' '.join(usernames))
 
     def last(self, number):
-        message = ''
-        current_time = int(time.time())
+        usernames = []
+        ref_time = util.current_time()
         for user in self.server.users.values():
-            minutes = float(current_time - user.last_active) / 60
-            if user.is_active() or minutes < number:
-                message += user.username
-                message += '\n'
-        self.request.sendall(message)
+            minutes = float(ref_time - user.last_active) / 60
+            if user.is_connected or minutes < number:
+                usernames.append(user.username)
+        self.send_line(' '.join(usernames))
 
     def broadcast(self, message):
-        self.send(message, self.server.users.values())
+        self.send(message, self.server.users.keys())
 
-    def send(self, message, users):
-        for user in users:
-            if user is not self.user and user.is_active():
-                user.send_message(message, self.user)
+    def send(self, message_string, usernames):
+        invalid_usernames, users_messaged = [], 0
+        for username in usernames:
+            user = self.server.users.get(username)
+            if not user:
+                invalid_usernames.append(username)
+            elif user is not self.user:
+                message = Message(message_string, self.user, user)
+                user.enqueue_message(message)
+                users_messaged += 1
+        self.send_line('sent:{}'.format(''.join(invalid_usernames)))
+        self.log('{} sent a message to {} user(s)'.format(
+            self.user.username,
+            users_messaged
+        ))
 
-    def prompt(self, string):
-        self.request.sendall(string)
-        return self.request.recv(1024).strip()
+    def recv(self):
+        data = self.request.recv(BUFFER_SIZE).strip()
+        if not data:
+            raise socket.error
+        return data
+
+    def send_line(self, string):
+        self.request.sendall('{}\n'.format(string))
+
+    def log(self, message):
+        print '[{}] {}: {}'.format(
+            util.current_time_string(),
+            self.ip,
+            message,
+        )
 
     @property
     def ip(self):
@@ -166,22 +209,20 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
     def block_time(self):
         return int(os.environ['BLOCK_TIME'])
 
-    def log(self, message):
-        print '[{}] {}: {}'.format(
-            time.strftime('%m/%d/%y at %H:%M:%S'),
-            self.ip,
-            message,
-        )
+    @property
+    def time_out(self):
+        return int(os.environ['TIME_OUT'])
 
 
 if len(sys.argv) > 1:
-    port_number = int(sys.argv[1])
-    server_address = ('localhost', port_number)
-    server = ChatServer(server_address, ChatRequestHandler)
+    ip_address, port_number = '209.2.218.105', int(sys.argv[1])
+    server_address = (ip_address, port_number)
+    server = ChatServer(server_address, ChatRequestHandler, 'user_pass.txt')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print 'Goodbye!'
+    finally:
         server.shutdown()
 else:
-    print 'Usage: python {} <port number>'.format(sys.argv[0])
+    print 'Usage: python {} <port>'.format(sys.argv[0])
