@@ -1,8 +1,10 @@
 # chatserv
 
-*CSEE 4119, HW 3*
-*Name*: Javier Llaca Ojinaga
-*UNI*: jl3960
+**CSEE 4119, HW 3**
+
+**Name**: Javier Llaca Ojinaga
+
+**UNI**: jl3960
 
 
 A TCP chat application written in python. The server and client programs adhere
