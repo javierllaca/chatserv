@@ -16,7 +16,6 @@ number of minutes
     send <user> <message>               Send message to user
     send (<user> ... <user>) <message>  Send message to group of users
     logout                              Logout from chat server
-    fetch                               Fetch pending messages
 """
 
 
@@ -28,8 +27,8 @@ class ChatClient:
         self.fd = self.socket.makefile()
 
     def close(self):
-        self.socket.close()
         self.fd.close()
+        self.socket.close()
 
     def handle(self):
         self.print_string(WELCOME_STRING)
@@ -39,10 +38,10 @@ class ChatClient:
                 self.read_messages()
                 command_string = self.get_input('> ')
                 if not command_string:
-                    command_string = 'fetch'  # fetch if no command
+                    command_string = 'fetch'
                 elif command_string == 'help':
                     self.print_string(HELP_STRING)
-                    continue
+                    command_string = 'fetch'
                 self.send_line(command_string)
                 response = self.read_line()
                 if response == 'goodbye':
@@ -96,6 +95,11 @@ class ChatClient:
                                 'User {} registered!\n'.format(username)
                             )
                             break
+                        else:
+                            self.print_string(
+                                'Password did not match. '
+                                'Please try again.\n'
+                            )
             elif response.startswith('blocked'):
                 blocked, time_left = response.split(',')
                 self.print_string(
@@ -143,7 +147,10 @@ class ChatClient:
             self.print_string('{}\n'.format('\n'.join(messages)))
 
     def read_line(self):
-        return self.fd.readline().strip()
+        line = self.fd.readline().strip()
+        if line == 'timeout':
+            raise socket.timeout
+        return line
 
     def send_line(self, string):
         self.socket.sendall('{}\n'.format(string))
@@ -163,10 +170,10 @@ if len(sys.argv) > 2:
     client = ChatClient(server_address)
     try:
         client.handle()
-    except socket.error as error:
-        print 'Server unreachable'
     except socket.timeout:
         print 'Connection timed out'
+    except socket.error:
+        print 'Server unreachable'
     except KeyboardInterrupt:
         print 'Goodbye!'
     finally:

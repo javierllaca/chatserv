@@ -2,6 +2,21 @@ from Queue import Queue
 import util
 
 
+class Message:
+
+    def __init__(self, message_string, from_user):
+        self.message_string = message_string
+        self.from_user = from_user
+        self.timestamp = util.current_time_string()
+
+    def __str__(self):
+        return '[{}] {}: {}'.format(
+            self.timestamp,
+            self.from_user.username,
+            self.message_string
+        )
+
+
 class User:
 
     def __init__(self, username, password_sha):
@@ -11,7 +26,7 @@ class User:
         self.ip = None
         self.last_active = float('-inf')
         self.blocked_ips = {}
-        self.message_queue = Queue()
+        self.message_queue = Queue()  # thread-safe
 
     def login(self, socket, ip):
         self.socket = socket

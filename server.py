@@ -1,9 +1,9 @@
-from message import Message
+from chat_objects import Message, User
 import os
 import socket
 import SocketServer
 import sys
-from user import User
+import user
 import util
 
 BUFFER_SIZE = 1024
@@ -19,8 +19,6 @@ class ChatServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
         )
         self.load_users(user_file_path)
         self.daemon_threads = True
-        os.environ['BLOCK_TIME'] = '60'
-        os.environ['TIME_OUT'] = str(30 * 60)
 
     def load_users(self, file_path):
         self.users = {}
@@ -49,6 +47,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
                     self.process_command(client_input)
             self.log('Connection terminated')
         except socket.timeout:
+            self.send_line('timeout')
             self.log('Connection timeout')
         except Exception:
             self.log('Connection lost')
@@ -108,9 +107,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     def process_command(self, command_string):
         command, args = util.parse_command(command_string)
-        if not command:
-            pass
-        elif command == 'who':
+        if command == 'who':
             self.who()
         elif command == 'last':
             try:
@@ -130,12 +127,12 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
                 self.send(message_string, usernames)
             except Exception:
                 self.send_line('error:args:{}'.format(command))
-        elif command == 'fetch':
-            self.send_line('fetching')
         elif command == 'logout':
             self.send_line('goodbye')
             self.user.logout()
             self.log('{} logged out'.format(self.user.username))
+        elif command == 'fetch':
+            self.send_line('fetching')
         else:
             self.send_line('error:command:{}'.format(command))
 
@@ -176,7 +173,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
             if not user:
                 invalid_usernames.append(username)
             elif user is not self.user:
-                message = Message(message_string, self.user, user)
+                message = Message(message_string, self.user)
                 user.enqueue_message(message)
                 users_messaged += 1
         self.send_line('sent:{}'.format(''.join(invalid_usernames)))
@@ -207,11 +204,11 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     @property
     def block_time(self):
-        return int(os.environ['BLOCK_TIME'])
+        return int(os.environ.get('BLOCK_TIME') or 60)
 
     @property
     def time_out(self):
-        return int(os.environ['TIME_OUT'])
+        return int(os.environ.get('TIME_OUT') or 30 * 60)
 
 
 if len(sys.argv) > 1:
