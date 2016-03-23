@@ -215,7 +215,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
 
 if len(sys.argv) > 1:
-    ip_address, port_number = '209.2.218.105', int(sys.argv[1])
+    ip_address, port_number = 'localhost', int(sys.argv[1])
     server_address = (ip_address, port_number)
     server = ChatServer(server_address, ChatRequestHandler, 'user_pass.txt')
     try:
