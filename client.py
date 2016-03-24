@@ -16,6 +16,7 @@ number of minutes
     send <user> <message>               Send message to user
     send (<user> ... <user>) <message>  Send message to group of users
     logout                              Logout from chat server
+    fetch                               Fetch messages in message queue
 """
 
 
@@ -24,7 +25,7 @@ class ChatClient:
     def __init__(self, server_address):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.connect(server_address)
-        self.fd = self.socket.makefile()
+        self.fd = self.socket.makefile()  # convenient for I/O
 
     def close(self):
         self.fd.close()
@@ -37,6 +38,7 @@ class ChatClient:
             while True:
                 self.read_messages()
                 command_string = self.get_input('> ')
+                # Default empty commands or `help` to `fetch`
                 if not command_string:
                     command_string = 'fetch'
                 elif command_string == 'help':
@@ -46,14 +48,14 @@ class ChatClient:
                 response = self.read_line()
                 if response == 'goodbye':
                     break  # terminate connection
-                elif response.startswith('sent'):
+                elif response.startswith('sent:'):
                     _, invalid_usernames = response.split(':')
                     if invalid_usernames:
                         self.print_string(
                             'The following username(s) are invalid: '
                             '{}\n'.format(invalid_usernames)
                         )
-                elif response.startswith('error'):
+                elif response.startswith('error:'):
                     _, error_type, command = response.split(':')
                     if error_type == 'command':
                         self.print_string(
@@ -100,8 +102,8 @@ class ChatClient:
                                 'Password did not match. '
                                 'Please try again.\n'
                             )
-            elif response.startswith('blocked'):
-                blocked, time_left = response.split(',')
+            elif response.startswith('blocked:'):
+                blocked, time_left = response.split(':')
                 self.print_string(
                     'Logins for {} from this IP address are blocked. Wait'
                     ' {} seconds for block to be lifted.\n'.format(
@@ -148,8 +150,9 @@ class ChatClient:
 
     def read_line(self):
         line = self.fd.readline().strip()
-        if line == 'timeout':
-            raise socket.timeout
+        if line.startswith('timeout:'):
+            _, time_out = line.split(':')
+            raise socket.timeout(time_out)
         return line
 
     def send_line(self, string):
@@ -170,8 +173,10 @@ if len(sys.argv) > 2:
     client = ChatClient(server_address)
     try:
         client.handle()
-    except socket.timeout:
-        print 'Connection timed out'
+    except socket.timeout as exception:
+        print 'Connection timed out after {} seconds'.format(
+            exception.message
+        )
     except socket.error:
         print 'Server unreachable'
     except KeyboardInterrupt:

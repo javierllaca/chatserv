@@ -47,14 +47,15 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
                     self.process_command(client_input)
             self.log('Connection terminated')
         except socket.timeout:
-            self.send_line('timeout')
+            self.send_line('timeout:{}'.format(self.time_out))
             self.log('Connection timeout')
         except Exception:
             self.log('Connection lost')
-        finally:
-            if self.user and self.user.is_connected:
-                self.user.logout()
-                self.log('{} logged out'.format(self.user.username))
+
+    def finish(self):
+        if self.user and self.user.is_connected:
+            self.user.logout()
+            self.log('{} logged out'.format(self.user.username))
 
     def authenticate(self):
         while not self.user:
@@ -81,7 +82,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
                     user.blocked_ips.pop(self.ip)
                     self.user = user
                 else:
-                    self.send_line('blocked,{}'.format(time_left))
+                    self.send_line('blocked:{}'.format(time_left))
                     return False
             elif user.is_connected:
                 self.send_line('connected')
