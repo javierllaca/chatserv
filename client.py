@@ -38,11 +38,10 @@ class ChatClient:
             while True:
                 self.read_messages()
                 command_string = self.get_input('> ')
-                # Default empty commands or `help` to `fetch`
-                if not command_string:
-                    command_string = 'fetch'
-                elif command_string == 'help':
+                if command_string == 'help':
                     self.print_string(HELP_STRING)
+                # Default empty commands or `help` to `fetch`
+                if not command_string or command_string == 'help':
                     command_string = 'fetch'
                 self.send_line(command_string)
                 response = self.read_line()
@@ -144,7 +143,7 @@ class ChatClient:
         if messages:
             self.get_input(
                 '{} new message(s). '
-                'Press any key to view: '.format(len(messages))
+                'Press enter to view: '.format(len(messages))
             )
             self.print_string('{}\n'.format('\n'.join(messages)))
 

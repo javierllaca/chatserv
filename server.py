@@ -38,17 +38,17 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
         try:
             self.log('Connection established')
             if self.authenticate():
-                self.user.login(self.request, self.ip)
+                self.user.login()
                 self.log('{} logged in'.format(self.user.username))
                 while self.user.is_connected:
                     self.send_messages()
-                    client_input = self.recv()
-                    self.user.last_active = util.current_time()
+                    client_input = self.read()
+                    self.user.register_activity()
                     self.process_command(client_input)
             self.log('Connection terminated')
         except socket.timeout:
             self.send_line('timeout:{}'.format(self.time_out))
-            self.log('Connection timeout')
+            self.log('Connection timed out')
         except Exception:
             self.log('Connection lost')
 
@@ -59,17 +59,17 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
 
     def authenticate(self):
         while not self.user:
-            username = self.recv()
+            username = self.read()
             user = self.server.users.get(username)
             if not user:
                 self.send_line('register')
-                register = self.recv()
+                register = self.read()
                 if register == 'y':
                     self.send_line('password')
-                    password = self.recv()
-                    while password != self.recv():
+                    password = self.read()
+                    while password != self.read():
                         self.send_line('password')
-                        password = self.recv()
+                        password = self.read()
                     self.send_line('registered')
                     self.register_user(username, password)
                 else:
@@ -91,7 +91,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
         login_attempts = 0
         while login_attempts < 3:
             self.send_line('password')
-            password = self.recv()
+            password = self.read()
             if self.user.password_sha == util.sha1_hex(password):
                 self.send_line('welcome')
                 return True
@@ -183,7 +183,7 @@ class ChatRequestHandler(SocketServer.BaseRequestHandler):
             users_messaged
         ))
 
-    def recv(self):
+    def read(self):
         data = self.request.recv(BUFFER_SIZE).strip()
         if not data:
             raise socket.error
